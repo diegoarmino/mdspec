@@ -2,8 +2,8 @@ module mdspec_lib
 
    private
    public :: read_inputfile,vac_autocor,run_avg,fourier,print_spectra,mdsin_type
-   
-  
+
+
    type mdsin_type
       integer :: nsteps
       integer :: ntraj
@@ -11,16 +11,16 @@ module mdspec_lib
       integer :: dodamp
       integer :: prefac
       integer :: convergence_check
-      real*8  :: dt
-      real*8  :: damp
+      double precision  :: dt
+      double precision  :: damp
    end type mdsin_type
 
    contains
 
       subroutine read_inputfile(inputfile,mdsin)
-!        READS INPUT FILE CONTAINING NAMELIST WITH PARAMETERS 
+!        READS INPUT FILE CONTAINING NAMELIST WITH PARAMETERS
          implicit none
-       
+
 !        --------------------------------------------------------------
          character(99),intent(in)      :: inputfile
          type(mdsin_type),intent(out)  :: mdsin
@@ -31,8 +31,8 @@ module mdspec_lib
          integer :: dodamp
          integer :: prefac
          integer :: convergence_check
-         real*8  :: dt
-         real*8  :: damp
+         double precision  :: dt
+         double precision  :: damp
 
          namelist /mdspec/ nsteps,ntraj,navg,dt,damp,dodamp,prefac,convergence_check
 
@@ -44,7 +44,7 @@ module mdspec_lib
             write(*,'(A,A)') 'ERROR OPENING INPUT FILE ', inputfile
             STOP
          end if
-        
+
          rewind 2
          read(2,nml=mdspec,iostat=ierr)
          if (ierr /= 0 ) then
@@ -72,26 +72,24 @@ module mdspec_lib
          write(*,'(A,F15.10)')'dt = ', mdsin%dt
          write(*,'(A,F15.10)')'damp = ', mdsin%damp
          write(*,'(A)') '----------------'
-         
+
       end subroutine
 
-      subroutine vac_autocor(datafile,acorr,nsteps,ntraj)
+      subroutine vac_autocor(datafile,acorr,nsteps,ncoords)
 !        CALCULATES THE AUTOCORRELATION FUNCTION FOR VACUUM SPECTRA.
 
          implicit none
-        
+
 !        --------------------------------------------------------------
          integer,intent(in)       :: nsteps
-         integer,intent(in)       :: ntraj
+         integer,intent(in)       :: ncoords
          character(90),intent(in) :: datafile
-         real*8,intent(out)       :: acorr(nsteps-1)
+         double precision,intent(out)       :: acorr(nsteps-1)
 
-         integer  :: i,j,k,ierr
-         real*8   :: ref(ntraj)
-         real*8   :: xdif(ntraj)
-         real*8   :: xold(ntraj)
-         real*8   :: xnew(ntraj)
-         real*8   :: corr(nsteps-1)
+         character(20)      :: fmt
+         integer  :: i,j,k,ierr,t,tau,icrd,maxlag
+         double precision   :: vel(nsteps)
+         double precision   :: corr(nsteps-1)
 !        --------------------------------------------------------------
 
 !        OPENING INPUT FILE
@@ -101,48 +99,35 @@ module mdspec_lib
             STOP
          end if
 
-!        FIRST VALUE OF AUTOCORRELATION FUNCTION
-         corr=0d0
-         write(*,'(A,I6)') 'READING DATAFILE FIRST TIME',1
-         read(1,*) (xold(i),i=1,ntraj)
-         read(1,*) (xnew(i),i=1,ntraj)
-         ref = xnew - xold    ! difference
-         do j=1,ntraj
-            corr(1) = corr(1) + ref(j)**2  ! average over trajectories
-         end do
-         xold=xnew   ! updating x
-         xnew=0
-
-!        THE REST OF AUTOCORRELATION FUNCTION
-         do i=2,nsteps-1
-            write(*,'(A,I6)') 'READING DATAFILE ITERATIONS',i
-!            read(1,'(F15.10)') (xnew(k),k=1,ntraj)
-            read(1,*) (xnew(k),k=1,ntraj)
-            xdif = xnew - xold   ! difference
-            do j=1,ntraj
-               corr(i) = corr(i) + xdif(j) * ref(j) ! average over trajectories
-            end do
-            xold = xnew
-            xnew = 0d0
-         end do
-         acorr = corr/ntraj
-         
-!        CLOSING DATA FILE
-         close(unit=1,iostat=ierr)
-         if (ierr /= 0) then
-            write(*,'(A,A)') 'ERROR CLOSING DATA FILE ',datafile
-            STOP
-         end if
-
          open(unit=10,file='autocorr.dat',iostat=ierr)
          if (ierr /= 0) then
             write(*,'(A,A)') 'ERROR OPENING INPUT FILE ',datafile
             STOP
          end if
 
+         write(fmt,'("(",I6,"D24.15)")') nsteps-1
+!        FIRST VALUE OF AUTOCORRELATION FUNCTION
+         maxlag=nsteps-2
+         read(1,*) (vel(i),i=1,nsteps)
+         !COMPUTE VELOCITIES WITH FOREWARD DIFFERENCES
          do i=1,nsteps-1
-            write(10,'(I6,D20.10)') i,acorr(i)
+            vel(i)=vel(i)-vel(i+1)
          end do
+         acorr=0d0
+         corr=0d0
+         do icrd=1,ncoords
+            do tau=1,maxlag
+               do t=1,nsteps-tau-1
+                  corr(tau) = corr(tau) + vel(t) * vel(t+tau)
+               end do
+            end do
+            acorr = corr/(nsteps-1)
+            write(10,fmt) acorr
+         end do
+
+!        CLOSING DATA FILE
+         close(unit=1,iostat=ierr)
+         close(unit=10,iostat=ierr)
 
       end subroutine
 
@@ -150,13 +135,13 @@ module mdspec_lib
 
 !        CALCULATES A RUNNING AVERAGE OF A DATA SERIES.
          implicit none
-         
+
 !        --------------------------------------------------------------
          integer,intent(in)     :: slen         ! Length of the data series.
          integer,intent(in)     :: navg         ! # of steps to average over.
-         real*8,intent(in)      :: series(slen) ! Data series.
-         real*8,intent(out)     :: avgser(slen-navg+1)
- 
+         double precision,intent(in)      :: series(slen) ! Data series.
+         double precision,intent(out)     :: avgser(slen-navg+1)
+
          integer i,j
 !        --------------------------------------------------------------
 
@@ -176,26 +161,26 @@ module mdspec_lib
          integer,intent(in)        :: dodamp
          integer,intent(in)        :: prefac
          integer,intent(in)        :: slen
-         real*8,intent(in)         :: dt
-         real*8,intent(in)         :: damp
-         real*8,intent(in)         :: series(slen)
-         real*8,intent(out)        :: rspec(40000)
-         real*8,intent(out)        :: ispec(40000)
+         double precision,intent(in)         :: dt
+         double precision,intent(in)         :: damp
+         double precision,intent(in)         :: series(slen)
+         double precision,intent(out)        :: rspec(40000)
+         double precision,intent(out)        :: ispec(40000)
 
          integer             :: i,j
-         real*8              :: ddt
-         real*8              :: dmp
-         real*8              :: dp
-         real*8              :: nu
-         real*8              :: ftr
-         real*8              :: fti
-         real*8              :: t
-         real*8,parameter    :: cc = 2.99792458d-5 ! speed of light cm/fs
-         real*8,parameter    :: pi = 3.1415926535897932384626433832795d0
+         double precision              :: ddt
+         double precision              :: dmp
+         double precision              :: dp
+         double precision              :: nu
+         double precision              :: ftr
+         double precision              :: fti
+         double precision              :: t
+         double precision,parameter    :: cc = 2.99792458d-5 ! speed of light cm/fs
+         double precision,parameter    :: pi = 3.1415926535897932384626433832795d0
 !        --------------------------------------------------------------
 
-         ddt = dt 
-         dmp = damp 
+         ddt = dt
+         dmp = damp
 
          do i = 1,10*4000
             nu = dble((0.1*i)) * cc
@@ -223,21 +208,21 @@ module mdspec_lib
 
       end subroutine
 
-      real*8 function dampfunc(damp,t) 
-         real*8  :: damp
-         real*8  :: t
+      double precision function dampfunc(damp,t)
+         double precision  :: damp
+         double precision  :: t
          dampfunc = exp(-t/damp)
          return
       end function
 
-      real*8 function qmfac(nu,temp)
-         real*8            :: nu
-         real*8            :: temp
-         real*8            :: beta
-         real*8            :: num
-         real*8            :: den
-         real*8,parameter  :: kb = 0.69503476
-         real*8,parameter  :: pi = 3.1415926535897932384626433832795d0
+      double precision function qmfac(nu,temp)
+         double precision            :: nu
+         double precision            :: temp
+         double precision            :: beta
+         double precision            :: num
+         double precision            :: den
+         double precision,parameter  :: kb = 0.69503476
+         double precision,parameter  :: pi = 3.1415926535897932384626433832795d0
 
          beta = 1d0/(kb*temp)
          num = (beta*nu)**2
@@ -246,20 +231,20 @@ module mdspec_lib
          qmfac = num/den
          return
       end function
-         
+
       subroutine print_spectra(slen,rspec,ispec,spectrafile)
          implicit none
 
 !        --------------------------------------------------------------
          integer,intent(in)         :: slen
-         real*8,intent(in)          :: rspec(slen)
-         real*8,intent(in)          :: ispec(slen)
+         double precision,intent(in)          :: rspec(slen)
+         double precision,intent(in)          :: ispec(slen)
          character(99),intent(in)   :: spectrafile
 
          integer  :: ierr,i
-         real*8   :: nu
+         double precision   :: nu
 !        --------------------------------------------------------------
- 
+
          open(unit=3,file=spectrafile,iostat=ierr)
          if (ierr /= 0) then
             write(*,'(A,A)') 'ERROR OPENNING FILE ',spectrafile
