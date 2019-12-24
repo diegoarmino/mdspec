@@ -1,7 +1,7 @@
 module mdspec_lib
 
    private
-   public :: read_inputfile,vac_autocor,run_avg,fourier,print_spectra,mdsin_type
+   public :: read_inputfile,get_spectra_fast,vac_autocor,run_avg,fourier,print_spectra,mdsin_type
 
 
    type mdsin_type
@@ -74,6 +74,70 @@ module mdspec_lib
          write(*,'(A)') '----------------'
 
       end subroutine
+
+      subroutine get_spectra_fast(datafile,nsteps,ncoords)
+!        CALCULATES THE FOURIER TRANSFORM OF THE AUTOCORRELATION FUNCTION
+!        AS THE SQUARE OF THE FOURIER TRANSFORM OF THE VELOCITY TRAJECTORY.
+
+         use, intrinsic :: iso_c_binding
+         implicit none
+
+         include 'fftw3.f03'
+!        --------------------------------------------------------------
+         integer,intent(in)       :: nsteps
+         integer,intent(in)       :: ncoords
+         character(90),intent(in) :: datafile
+         double precision                   :: spectra(nsteps/2+1)
+
+         character(20)      :: fmt
+         integer  :: i,j,k,ierr,t,tau,icrd,maxlag
+         complex*16         :: out(nsteps/2+1)
+         double precision   :: vel(nsteps)
+         double precision   :: corr(nsteps-1)
+
+!        --------------------------------------------------------------
+         integer*8 :: plan
+         !type(C_PTR) :: plan
+!        --------------------------------------------------------------
+
+!        OPENING INPUT FILE
+         open(unit=1,file=datafile,iostat=ierr)
+         if (ierr /= 0) then
+            write(*,'(A,A)') 'ERROR OPENING INPUT FILE ',datafile
+            STOP
+         end if
+
+         open(unit=100,file='spectra.dat',iostat=ierr)
+         if (ierr /= 0) then
+            write(*,'(A,A)') 'ERROR OPENING INPUT FILE ',datafile
+            STOP
+         end if
+
+         write(fmt,'("(",I6,"D24.15)")') nsteps-1
+!        FOURIER TRANSFORM OF THE AUTOCORRELATION FUNCTION OF EACH COORDINATE
+!        IN TURN...
+         maxlag=nsteps-2
+         do icrd=1,ncoords
+            read(1,*) (vel(i),i=1,nsteps)
+            !COMPUTE VELOCITIES WITH FOREWARD DIFFERENCES
+            do i=1,nsteps-1
+               vel(i)=vel(i)-vel(i+1)
+            end do
+            call dfftw_plan_dft_r2c_1d(plan,nsteps,vel,out,"FFTW_ESTIMATE")
+            call dfftw_execute_dft_r2c(plan, vel, out)
+            call dfftw_destroy_plan(plan)
+            out = out * out
+            spectra = out
+            write(100,fmt) spectra
+         end do
+
+!        CLOSING DATA FILE
+         close(unit=1,iostat=ierr)
+         close(unit=100,iostat=ierr)
+
+      end subroutine
+
+
 
       subroutine vac_autocor(datafile,acorr,nsteps,ncoords)
 !        CALCULATES THE AUTOCORRELATION FUNCTION FOR VACUUM SPECTRA.

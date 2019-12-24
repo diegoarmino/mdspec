@@ -1,13 +1,18 @@
    program mdspec
       use mdspec_lib
+      use, intrinsic :: iso_c_binding
+
 
       implicit none
+
+      include 'fftw3.f03'
 !     ------------------------------------------------------------------
       type(mdsin_type)       :: mdsin
       character(99)          :: inputfile
       character(99)          :: datafile
       character(99)          :: specfile
       integer                :: clcount
+      integer                :: method
       integer                :: acdim
       integer                :: avgdim
       integer                :: ierr
@@ -41,7 +46,7 @@
          write(*,'(A)') 'are used: "input", "data" and "spectra".      '
       end if
 
-!     READ FILE NAMES FROM COMMAND LINE 
+!     READ FILE NAMES FROM COMMAND LINE
       call get_command_argument(1,inputfile)
       call get_command_argument(2,datafile)
       call get_command_argument(3,specfile)
@@ -60,89 +65,97 @@
       rspec   =0d0
       ispec   =0d0
 
-!     Calculate auto correlation function vacuum style.
-      call vac_autocor(datafile,acorr,mdsin%nsteps,mdsin%ntraj)
+      method = 1
+      IF (method == 0) then
+   !     Calculate auto correlation function vacuum style.
+         call vac_autocor(datafile,acorr,mdsin%nsteps,mdsin%ntraj)
 
-!     Calculate running average of said autocorr.
-      if (mdsin%navg > 1) then
-         call run_avg(acorr,acdim,mdsin%navg,avgcorr)
-      else
-         avgcorr=acorr
-      end if
+   !     Calculate running average of said autocorr.
+         if (mdsin%navg > 1) then
+            call run_avg(acorr,acdim,mdsin%navg,avgcorr)
+         else
+            avgcorr=acorr
+         end if
 
-!     Calculate real and imaginary Fourier transform (rspec and ispec).
-      call fourier(avgcorr,mdsin%dodamp,mdsin%prefac,avgdim,mdsin%dt,& 
-                   &mdsin%damp,rspec,ispec)
+   !     Calculate real and imaginary Fourier transform (rspec and ispec).
+         call fourier(avgcorr,mdsin%dodamp,mdsin%prefac,avgdim,mdsin%dt,&
+                      &mdsin%damp,rspec,ispec)
+!        Print spectra
+         call print_spectra(40000,rspec,ispec,specfile)
+      ELSE
+         call get_spectra_fast(datafile,mdsin%nsteps,mdsin%ntraj)
+      END IF
 
-!     Print spectra
-      call print_spectra(40000,rspec,ispec,specfile)
 
-!     Convergence check
-    write(*,'(A,2I)') 'convergence check option = ',mdsin%convergence_check
-    IF (mdsin%convergence_check == 1) THEN
-      allocate( newspec(40000),oldspec(40000),rmsdspec(40000),convplot(mdsin%ntraj) )
+!     --------------------------------------------------------------------------
+!     CONVERGENCE CHECK SECTION
+!     --------------------------------------------------------------------------
 
-      do i=1,mdsin%ntraj
-        !Initialize
-        acorr   =0d0
-        avgcorr =0d0
-        rspec   =0d0
-        ispec   =0d0
-        newspec =0d0
+       write(*,'(A,I2)') 'convergence check option = ',mdsin%convergence_check
+       IF (mdsin%convergence_check == 1) THEN
+         allocate( newspec(40000),oldspec(40000),rmsdspec(40000),convplot(mdsin%ntraj) )
 
-!       Calculate auto correlation function vacuum style.
-        call vac_autocor(datafile,acorr,mdsin%nsteps,i)
+         do i=1,mdsin%ntraj
+           !Initialize
+           acorr   =0d0
+           avgcorr =0d0
+           rspec   =0d0
+           ispec   =0d0
+           newspec =0d0
 
-!       Calculate running average of said autocorr.
-        if (mdsin%navg > 1) then
-           call run_avg(acorr,acdim,mdsin%navg,avgcorr)
-        else
-           avgcorr=acorr
-        end if
+   !       Calculate auto correlation function vacuum style.
+           call vac_autocor(datafile,acorr,mdsin%nsteps,i)
 
-!       Calculate Fourier transform (rspec).
-        if (i==1) then
-           call fourier(avgcorr,mdsin%dodamp,mdsin%prefac,avgdim,mdsin%dt,&
-                        &mdsin%damp,oldspec,ispec)
-        else
-           call fourier(avgcorr,mdsin%dodamp,mdsin%prefac,avgdim,mdsin%dt,&
-                        &mdsin%damp,newspec,ispec)
-        end if
+   !       Calculate running average of said autocorr.
+           if (mdsin%navg > 1) then
+              call run_avg(acorr,acdim,mdsin%navg,avgcorr)
+           else
+              avgcorr=acorr
+           end if
 
-!       Compute spectrum of RMSDs
-        rmsdspec = Sqrt((newspec - oldspec)**2)
+   !       Calculate Fourier transform (rspec).
+           if (i==1) then
+              call fourier(avgcorr,mdsin%dodamp,mdsin%prefac,avgdim,mdsin%dt,&
+                           &mdsin%damp,oldspec,ispec)
+           else
+              call fourier(avgcorr,mdsin%dodamp,mdsin%prefac,avgdim,mdsin%dt,&
+                           &mdsin%damp,newspec,ispec)
+           end if
 
-!       Integrate
-        intrmsd = 0d0
-        do j=1,40000
-           intrmsd = intrmsd + rmsdspec(j)
+   !       Compute spectrum of RMSDs
+           rmsdspec = Sqrt((newspec - oldspec)**2)
+
+   !       Integrate
+           intrmsd = 0d0
+           do j=1,40000
+              intrmsd = intrmsd + rmsdspec(j)
+           end do
+
+           convplot(i) = intrmsd
+
+           oldspec = newspec
+           newspec = 0d0
+
+           write(*,'(A,I5,A,I5)') 'STEP ', i,'/',mdsin%ntraj
+
         end do
 
-        convplot(i) = intrmsd
+        open(unit=4,file='convergence_plot.dat',iostat=ierr)
+        if (ierr /= 0) then
+           write(*,'(A,A)') 'ERROR OPENNING FILE ','convergence_plot.dat'
+           STOP
+        end if
 
-        oldspec = newspec
-        newspec = 0d0
+        do i = 1,mdsin%ntraj
+           write(4,'(I5,D17.8)') i, log10(convplot(i))
+        end do
 
-        write(*,'(A,I5,A,I5)') 'STEP ', i,'/',mdsin%ntraj
+        close(unit=4,iostat=ierr)
+        if (ierr /= 0) then
+           write(*,'(A,A)') 'ERROR CLOSING FILE ','convergence_plot.dat'
+           STOP
+        end if
 
-     end do
-    
-     open(unit=4,file='convergence_plot.dat',iostat=ierr)
-     if (ierr /= 0) then
-        write(*,'(A,A)') 'ERROR OPENNING FILE ','convergence_plot.dat'
-        STOP
-     end if
-
-     do i = 1,mdsin%ntraj
-        write(4,'(I5,D17.8)') i, log10(convplot(i))
-     end do
-
-     close(unit=4,iostat=ierr)
-     if (ierr /= 0) then
-        write(*,'(A,A)') 'ERROR CLOSING FILE ','convergence_plot.dat'
-        STOP
-     end if
-
-   END IF
+      END IF
 
      end program mdspec
