@@ -57,7 +57,7 @@
 
       acdim=mdsin%nsteps - 1
       avgdim=acdim-mdsin%navg+1
-      allocate( acorr(acdim),avgcorr(avgdim),rspec(40000),ispec(40000) )
+      allocate( acorr(acdim),avgcorr(avgdim),rspec(acdim/2+1),ispec(acdim/2+1) )
 
 !     Initialize
       acorr   =0d0
@@ -65,11 +65,9 @@
       rspec   =0d0
       ispec   =0d0
 
-      method = 1
-      IF (method == 0) then
+      IF (mdsin%method == 0) then
    !     Calculate auto correlation function vacuum style.
-         call vac_autocor(datafile,acorr,mdsin%nsteps,mdsin%ntraj)
-
+         call vac_autocor(datafile,acorr,mdsin%nsteps,mdsin%ntraj,mdsin%dt,mdsin%damp,mdsin%dodamp)
    !     Calculate running average of said autocorr.
          if (mdsin%navg > 1) then
             call run_avg(acorr,acdim,mdsin%navg,avgcorr)
@@ -81,9 +79,9 @@
          call fourier(avgcorr,mdsin%dodamp,mdsin%prefac,avgdim,mdsin%dt,&
                       &mdsin%damp,rspec,ispec)
 !        Print spectra
-         call print_spectra(40000,rspec,ispec,specfile)
+         call print_spectra(mdsin%dt,acdim,rspec,ispec,specfile)
       ELSE
-         call get_spectra_fast(datafile,mdsin%nsteps,mdsin%ntraj)
+         call get_spectra_fast(datafile,mdsin%nsteps,mdsin%ntraj,mdsin%dt)
       END IF
 
 
@@ -104,7 +102,7 @@
            newspec =0d0
 
    !       Calculate auto correlation function vacuum style.
-           call vac_autocor(datafile,acorr,mdsin%nsteps,i)
+           call vac_autocor(datafile,acorr,mdsin%nsteps,i,mdsin%dt,mdsin%damp,mdsin%dodamp)
 
    !       Calculate running average of said autocorr.
            if (mdsin%navg > 1) then

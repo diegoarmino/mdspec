@@ -6,6 +6,7 @@ module mdspec_lib
 
    type mdsin_type
       integer :: nsteps
+      integer :: method
       integer :: ntraj
       integer :: navg
       integer :: dodamp
@@ -26,6 +27,7 @@ module mdspec_lib
          type(mdsin_type),intent(out)  :: mdsin
 
          integer :: nsteps
+         integer :: method
          integer :: ntraj
          integer :: navg
          integer :: dodamp
@@ -34,7 +36,7 @@ module mdspec_lib
          double precision  :: dt
          double precision  :: damp
 
-         namelist /mdspec/ nsteps,ntraj,navg,dt,damp,dodamp,prefac,convergence_check
+         namelist /mdspec/ nsteps,ntraj,navg,dt,damp,dodamp,prefac,convergence_check,method
 
          integer     :: ierr
 !        --------------------------------------------------------------
@@ -59,6 +61,7 @@ module mdspec_lib
          mdsin%prefac = prefac
          mdsin%dt     = dt
          mdsin%damp   = damp
+         mdsin%method = method
          mdsin%convergence_check   = convergence_check
 
          write(*,'(A)') 'INPUT PARAMETERS'
@@ -69,13 +72,14 @@ module mdspec_lib
          write(*,'(A,I6)')'dodamp = ', mdsin%dodamp
          write(*,'(A,I6)')'prefac = ', mdsin%prefac
          write(*,'(A,I6)')'convergence_check = ', mdsin%convergence_check
+         write(*,'(A,I6)')'method = ', mdsin%method
          write(*,'(A,F15.10)')'dt = ', mdsin%dt
          write(*,'(A,F15.10)')'damp = ', mdsin%damp
          write(*,'(A)') '----------------'
 
       end subroutine
 
-      subroutine get_spectra_fast(datafile,nsteps,ncoords)
+      subroutine get_spectra_fast(datafile,nsteps,ncoords,dt)
 !        CALCULATES THE FOURIER TRANSFORM OF THE AUTOCORRELATION FUNCTION
 !        AS THE SQUARE OF THE FOURIER TRANSFORM OF THE VELOCITY TRAJECTORY.
 
@@ -87,13 +91,20 @@ module mdspec_lib
          integer,intent(in)       :: nsteps
          integer,intent(in)       :: ncoords
          character(90),intent(in) :: datafile
-         double precision                   :: spectra(nsteps/2+1)
+         double precision         :: spectra(nsteps/2+1)
+         double precision         :: dt
 
          character(20)      :: fmt
          integer  :: i,j,k,ierr,t,tau,icrd,maxlag
          complex*16         :: out(nsteps/2+1)
+         double precision   :: cumul(nsteps/2+1)
+         double precision   :: noise
+         double precision   :: sample_rate
+         double precision   :: nu_increment
+         double precision   :: nu
          double precision   :: vel(nsteps)
          double precision   :: corr(nsteps-1)
+         double precision   :: PI,nu1,nu2,nu3,tt
 
 !        --------------------------------------------------------------
          integer*8 :: plan
@@ -116,44 +127,107 @@ module mdspec_lib
          write(fmt,'("(",I6,"D24.15)")') nsteps-1
 !        FOURIER TRANSFORM OF THE AUTOCORRELATION FUNCTION OF EACH COORDINATE
 !        IN TURN...
-         maxlag=nsteps-2
+         cumul=0d0
          do icrd=1,ncoords
+            write(*,*) 'ANALYZING COORINATE No ', icrd
+!           READ COORDINATE FROM FILE
             read(1,*) (vel(i),i=1,nsteps)
-            !COMPUTE VELOCITIES WITH FOREWARD DIFFERENCES
+!           VELOCITIES WITH FOREWARD DIFFERENCES
             do i=1,nsteps-1
-               vel(i)=vel(i)-vel(i+1)
+              vel(i)=vel(i)-vel(i+1)
             end do
-            call dfftw_plan_dft_r2c_1d(plan,nsteps,vel,out,"FFTW_ESTIMATE")
+            vel(nsteps)=0d0
+
+!           @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+!           DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
+!           @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+!           CREATES FAKE DATA COMPOSED OF A SUM OF THREE SINE FUNCTIONS.
+            !
+            ! PI = 3.14159d0
+            ! nu1= 0.5d0
+            ! nu2= 1.0d0
+            ! nu3= 2.22d0
+            !
+            ! do k=0,nsteps-1
+            !    tt= real(k,8) * dt
+            !    CALL RANDOM_NUMBER(noise)
+            !    vel(k) = sin( 2d0 * PI * nu1 * tt ) + &
+            !    &        sin( 2d0 * PI * nu2 * tt ) + &
+            !    &        sin( 2d0 * PI * nu3 * tt ) !+ 10d0 * noise
+            !    write(89,*) vel(k)
+            ! end do
+            !
+!           @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+!           DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
+!           @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+            if (icrd==1) then
+               call dfftw_plan_dft_r2c_1d(plan,nsteps,vel,out,"FFTW_ESTIMATE")
+            endif
             call dfftw_execute_dft_r2c(plan, vel, out)
-            call dfftw_destroy_plan(plan)
-            out = out * out
-            spectra = out
-            write(100,fmt) spectra
+            out = conjg(out)*out
+            write(100,fmt) REAL(out)
+            cumul = cumul + REAL(out)
          end do
 
-!        CLOSING DATA FILE
+!        Writing sum spectra to disk.
+         open(unit=1000,file='sum_spectra.dat',iostat=ierr)
+         if (ierr /= 0) then
+            write(*,'(A,A)') 'ERROR OPENING INPUT FILE ',datafile
+            STOP
+         end if
+         write(1000,fmt) cumul
+         close(unit=1000,iostat=ierr)
+
+!        Destroying fftw plan
+         call dfftw_destroy_plan(plan)
+
+!        CLOSING DATA AND COORD-SPECTRA FILE
          close(unit=1,iostat=ierr)
          close(unit=100,iostat=ierr)
+
+!        CREATING A FREQUENCY AXIS AND WRITING IT TO FILE
+         open(unit=1,file='freq_axis.dat',iostat=ierr)
+         if (ierr /= 0) then
+            write(*,'(A,A)') 'ERROR OPENING INPUT FILE ','freq_axis.dat'
+            STOP
+         end if
+
+         sample_rate=1/dt
+         sample_rate=sample_rate/1d12 ! dt in ps, freq in THz
+         nu_increment = sample_rate/dble(nsteps)
+
+         nu = 0d0
+         do i = 1,nsteps/2+1
+            write(1,'(D17.8)') nu
+            nu = nu + nu_increment
+         end do
+         close(unit=1,iostat=ierr)
 
       end subroutine
 
 
 
-      subroutine vac_autocor(datafile,acorr,nsteps,ncoords)
+      subroutine vac_autocor(datafile,acorr,nsteps,ncoords,dt,damp,dodamp)
 !        CALCULATES THE AUTOCORRELATION FUNCTION FOR VACUUM SPECTRA.
 
          implicit none
 
 !        --------------------------------------------------------------
-         integer,intent(in)       :: nsteps
-         integer,intent(in)       :: ncoords
-         character(90),intent(in) :: datafile
+         integer,intent(in)                 :: nsteps
+         integer,intent(in)                 :: ncoords
+         integer,intent(in)                 :: dodamp
+         character(90),intent(in)           :: datafile
+         double precision,intent(in)        :: dt
+         double precision,intent(in)        :: damp
          double precision,intent(out)       :: acorr(nsteps-1)
 
          character(20)      :: fmt
          integer  :: i,j,k,ierr,t,tau,icrd,maxlag
          double precision   :: vel(nsteps)
          double precision   :: corr(nsteps-1)
+         double precision   :: noise
+         double precision   :: nu1,nu2,nu3,per1,per2,per3,tt,PI,dp,time
 !        --------------------------------------------------------------
 
 !        OPENING INPUT FILE
@@ -172,11 +246,36 @@ module mdspec_lib
          write(fmt,'("(",I6,"D24.15)")') nsteps-1
 !        FIRST VALUE OF AUTOCORRELATION FUNCTION
          maxlag=nsteps-2
+
          read(1,*) (vel(i),i=1,nsteps)
          !COMPUTE VELOCITIES WITH FOREWARD DIFFERENCES
          do i=1,nsteps-1
             vel(i)=vel(i)-vel(i+1)
          end do
+
+!        @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+!        DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
+!        @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+         ! PI = 3.14159d0
+         ! nu1= 0.5d0
+         ! nu2= 1.0d0
+         ! nu3= 2.22d0
+         ! per1=1/nu1
+         ! per2=1/nu2
+         ! per3=1/nu3
+         !
+         ! do k=0,nsteps-1
+         !    tt= real(k,8) * dt
+         !    CALL RANDOM_NUMBER(noise)
+         !    vel(k) = sin( 2d0 * PI * nu1 * tt ) + &
+         !    &        sin( 2d0 * PI * nu2 * tt ) + &
+         !    &        sin( 2d0 * PI * nu3 * tt ) !+ 10d0 * noise
+         !    write(89,*) vel(k)
+         ! end do
+!        @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+!        DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
+!        @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
          acorr=0d0
          corr=0d0
          do icrd=1,ncoords
@@ -184,6 +283,10 @@ module mdspec_lib
                do t=1,nsteps-tau-1
                   corr(tau) = corr(tau) + vel(t) * vel(t+tau)
                end do
+               dp = 1d0
+               time = dt*tau
+               if (dodamp == 1) dp = dampfunc(damp,time)
+               corr(tau) = corr(tau) * dp
             end do
             acorr = corr/(nsteps-1)
             write(10,fmt) acorr
@@ -228,8 +331,8 @@ module mdspec_lib
          double precision,intent(in)         :: dt
          double precision,intent(in)         :: damp
          double precision,intent(in)         :: series(slen)
-         double precision,intent(out)        :: rspec(40000)
-         double precision,intent(out)        :: ispec(40000)
+         double precision,intent(out)        :: rspec(slen/2+1)
+         double precision,intent(out)        :: ispec(slen/2+1)
 
          integer             :: i,j
          double precision              :: ddt
@@ -239,15 +342,20 @@ module mdspec_lib
          double precision              :: ftr
          double precision              :: fti
          double precision              :: t
+         double precision              :: sample_rate
+         double precision              :: nu_increment
          double precision,parameter    :: cc = 2.99792458d-5 ! speed of light cm/fs
          double precision,parameter    :: pi = 3.1415926535897932384626433832795d0
 !        --------------------------------------------------------------
 
          ddt = dt
          dmp = damp
+         sample_rate = 1/ddt
+         nu_increment = sample_rate/dble(slen)
 
-         do i = 1,10*4000
-            nu = dble((0.1*i)) * cc
+         nu = 0d0
+         do i = 1,slen/2+1
+
             ftr = 0d0
             fti = 0d0
 
@@ -255,18 +363,17 @@ module mdspec_lib
             do j=1,slen-1
                t = t + ddt
 
-               dp = 1d0
-               if (dodamp == 1) dp = dampfunc(damp,t)
-
-               ftr = ftr + cos(2*pi*t*nu) * series(j) * dp
-               fti = fti + sin(2*pi*t*nu) * series(j) * dp
+               ftr = ftr + cos(2*pi*t*nu) * series(j)
+               fti = fti + sin(2*pi*t*nu) * series(j)
             end do
 
-            rspec(i) = ftr**2 + fti**2
+            rspec(i) = ftr
+            !rspec(i) = ftr**2 + fti**2
 !            rspec(i) = Sqrt(ftr**2 + fti**2)
 !            rspec(i) = Abs(ftr) + Abs(fti)
             if (prefac == 1) rspec(i) = qmfac(nu,300d0) * rspec(i)
-            ispec(i) = fti**2
+            ispec(i) = fti
+            nu = nu + nu_increment
 
          end do
 
@@ -296,17 +403,18 @@ module mdspec_lib
          return
       end function
 
-      subroutine print_spectra(slen,rspec,ispec,spectrafile)
+      subroutine print_spectra(timestep,slen,rspec,ispec,spectrafile)
          implicit none
 
 !        --------------------------------------------------------------
          integer,intent(in)         :: slen
+         double precision,intent(in)          :: timestep
          double precision,intent(in)          :: rspec(slen)
          double precision,intent(in)          :: ispec(slen)
          character(99),intent(in)   :: spectrafile
 
          integer  :: ierr,i
-         double precision   :: nu
+         double precision   :: nu,sample_rate,nu_increment
 !        --------------------------------------------------------------
 
          open(unit=3,file=spectrafile,iostat=ierr)
@@ -315,9 +423,13 @@ module mdspec_lib
             STOP
          end if
 
-         do i = 1,10*4000
-            nu = dble((0.1*i))
-            write(3,'(F10.2,2D17.8)') nu, rspec(i), ispec(i)
+         sample_rate=1/timestep
+         nu_increment = sample_rate/dble(slen)
+
+         nu = 0d0
+         do i = 1,slen/2+1
+            write(3,'(3D17.8)') nu, rspec(i), ispec(i)
+            nu = nu + nu_increment
          end do
 
          close(unit=3,iostat=ierr)
