@@ -66,6 +66,7 @@
       ispec   =0d0
 
       IF (mdsin%method == 0) then
+   !     BRUTE FORCE METHOD
    !     Calculate auto correlation function vacuum style.
          call vac_autocor(datafile,acorr,mdsin%nsteps,mdsin%ntraj,mdsin%dt,mdsin%damp,mdsin%dodamp)
    !     Calculate running average of said autocorr.
@@ -81,6 +82,7 @@
 !        Print spectra
          call print_spectra(mdsin%dt,acdim,rspec,ispec,specfile)
       ELSE
+   !     FAST METHOD
          call get_spectra_fast(datafile,mdsin%nsteps,mdsin%ntraj,mdsin%dt)
       END IF
 
