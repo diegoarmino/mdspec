@@ -57,11 +57,14 @@ module pump_probe_mod
          integer                                       :: count(3)
          integer                                       :: start(3)
          integer                                       :: err
+         integer                                       :: specframes
+         integer                                       :: specdim
          character(len=80)                             :: title
          integer                                       :: natom
          integer                                       :: nframes
          double precision,allocatable, dimension(:,:)  :: Coords, Velo
          double precision,allocatable, dimension(:)    :: Veltraj
+         double precision,allocatable, dimension(:,:)  :: tdspec
          double precision                              :: Time
          double precision, dimension(3)                :: box
          double precision                              :: alpha, beta, gamma
@@ -126,10 +129,17 @@ module pump_probe_mod
 !        FOURIER TRANSFORM OF THE AUTOCORRELATION FUNCTION OF EACH COORDINATE
 !        IN TURN...
          cumul=0d0
+
+         specframes=nframes/2+1
+         specdim=specframes/2+1
+         allocate( tdspec(specdim,nframes/2+1) )
+         tdspec=0d0
+
+         do time0=1,nframes/2-2
          do iatm=1,natom
          do xyz=1,3
-            start=(/ 1, xyz, natom /)
-            count=(/ nframes, xyz, natom /)
+            start=(/ time0, xyz, natom /)
+            count=(/ time0+specframes, xyz, natom /)
             write(*,*) 'ANALYZING ATOM No ', iatm
             ! Get velocities
             if (velocityVID.ne.-1) then
@@ -171,6 +181,8 @@ module pump_probe_mod
             cumul = cumul + REAL(out)
          end do
          end do
+         tdspec(:,time0) = cumul
+         end do
 
 !        Writing sum spectra to disk.
          open(unit=1000,file='sum_spectra.dat',iostat=ierr)
@@ -197,7 +209,7 @@ module pump_probe_mod
 
          sample_rate=1/dt
          sample_rate=sample_rate/1d12 ! dt in ps, freq in THz
-         nu_increment = sample_rate/dble(nsteps)
+         nu_increment = sample_rate/dble(specframes)
 
          nu = 0d0
          do i = 1,nsteps/2+1
