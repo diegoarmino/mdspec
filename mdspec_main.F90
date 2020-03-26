@@ -1,5 +1,6 @@
    program mdspec
-      use mdspec_lib
+      use linearSpectroscopy_mod
+      use pump_probe_mod
       use, intrinsic :: iso_c_binding
 
 
@@ -81,9 +82,12 @@
                       &mdsin%damp,rspec,ispec)
 !        Print spectra
          call print_spectra(mdsin%dt,acdim,rspec,ispec,specfile)
-      ELSE
+      ELSE if (mdsin%method == 1) then
    !     FAST METHOD
          call get_spectra_fast(datafile,mdsin%nsteps,mdsin%ntraj,mdsin%dt)
+      ELSE
+         write(*,*) 'running pump-probe code'
+         call pump_probe(datafile,mdsin%nsteps,mdsin%ntraj,mdsin%dt)
       END IF
 
 

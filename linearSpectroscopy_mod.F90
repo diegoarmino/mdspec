@@ -1,4 +1,4 @@
-module mdspec_lib
+module linearSpectroscopy_mod
 
    private
    public :: read_inputfile,get_spectra_fast,vac_autocor,run_avg,fourier,print_spectra,mdsin_type
@@ -440,4 +440,4 @@ module mdspec_lib
 
       end subroutine
 
-end module mdspec_lib
+end module linearSpectroscopy_mod
