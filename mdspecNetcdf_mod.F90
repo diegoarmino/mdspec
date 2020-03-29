@@ -61,7 +61,6 @@ logical function NC_error(err, location)
 
   NC_error=.false.
   if (err .ne. nf90_noerr) then
-    write(*,*) 'here NC_error', err, nf90_noerr
     if (verbose_netcdf) then
       write(*, '(a,a)') 'NetCDF error: ', trim(nf90_strerror(err))
       if (present(location)) then

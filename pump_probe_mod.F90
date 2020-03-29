@@ -26,9 +26,10 @@ module pump_probe_mod
 !        THE FIRST FRAME.
 
          use netcdf
+         use nextprmtop_section_mod
          use mdspecNetcdf_mod, only: NC_openRead,NC_setupCoordsVelo,NC_close, &
                                      NC_error,NC_readRestartBox,NC_setupRestart,&
-                                     NC_setupMdcrd
+                                     NC_setupMdcrd,checkNCerror
          use, intrinsic :: iso_c_binding
          implicit none
 
@@ -40,10 +41,10 @@ module pump_probe_mod
          double precision         :: spectra(nsteps/2+1)
          double precision         :: dt
 
-         character(20)      :: fmt
-         integer  :: i,j,k,ierr,t,tau,icrd,maxlag,iatm,xyz
+         character(20)      :: fmt,fmtin
+         character(80)      :: type
+         integer  :: i,j,k,ierr,t,tau,icrd,maxlag,iatm,xyz,time0
          complex*16         :: out(nsteps/2+1)
-         double precision   :: cumul(nsteps/2+1)
          double precision   :: noise
          double precision   :: sample_rate
          double precision   :: nu_increment
@@ -63,8 +64,11 @@ module pump_probe_mod
          integer                                       :: natom
          integer                                       :: nframes
          double precision,allocatable, dimension(:,:)  :: Coords, Velo
-         double precision,allocatable, dimension(:)    :: Veltraj
+         double precision,allocatable, dimension(:)    :: veltraj
+         double precision,allocatable, dimension(:)    :: veltraj_window
+         double precision,allocatable, dimension(:)    :: atmass
          double precision,allocatable, dimension(:,:)  :: tdspec
+         double precision,allocatable, dimension(:,:)  :: cumul
          double precision                              :: Time
          double precision, dimension(3)                :: box
          double precision                              :: alpha, beta, gamma
@@ -78,7 +82,6 @@ module pump_probe_mod
 
 !        OPENING INPUT FILE
          ! ---=== Open file
-         write(*,*) ncid
          if (NC_openRead(datafile, ncid)) then
            write(*,'(a)') "read_nc_restart(): Could not open coordinate file."
            stop
@@ -96,20 +99,25 @@ module pump_probe_mod
                                coordVID, velocityVID, timeVID, &
                                cellLengthVID, cellAngleVID, TempVID)) stop
 
+         write(*,*) nframes
          allocate(Coords(3, natom), Velo(3, natom), veltraj(nframes))
 
 !         ! Get coords
 !         if (NC_error(nf90_get_var(ncid, coordVID, Coords(1:3,1:natom), &
-!                            start = (/ 1, 1, 1 /), count = (/ 1, 3, natom /)),&
-!               'reading restart coordinates')) stop
+!                            start = (/ 1, 1, 499 /), count = (/ 3, natom, 1 /)),&
+!               'reading trajectory coordinates')) stop
+!         write(*,*) coords
+!         stop
 
          ! Get velocities
-         if (velocityVID.ne.-1) then
-           velocities_found=.true.
-           if (NC_error(nf90_get_var(ncid, velocityVID, Velo(1:3,1:natom), &
-                                     start = (/ 1, 1, 1 /), count = (/ 1, 3, natom /)),&
-                        "read_nc_restart(): Getting velocities")) stop
-         endif
+!         if (velocityVID.ne.-1) then
+!           velocities_found=.true.
+!           if (NC_error(nf90_get_var(ncid, velocityVID, Velo(1:3,1:natom,1), &
+!                                     start = (/ 1, 1, 500 /), count = (/ 3, natom, 1 /)),&
+!                        "read_nc_restart(): Getting velocities")) stop
+!         endif
+!         write(*,*) velo
+!         stop
 
 !         ! Get box information
 !         if (NC_readRestartBox(ncid,box(1),box(2),box(3),alpha,beta,gamma)) then
@@ -119,78 +127,82 @@ module pump_probe_mod
 !         endif
 
 !        OPEN FILE HOLDING INDIVIUAL SPECTRA (ONE FOR EACH COORDINATE)
-         open(unit=100,file='spectra.dat',iostat=ierr)
+!         open(unit=100,file='spectra.dat',iostat=ierr)
+!         if (ierr /= 0) then
+!            write(*,'(A,A)') 'ERROR OPENING INPUT FILE ',datafile
+!            STOP
+!         end if
+
+         write(fmt,'("(",I6,"D24.15)")') nsteps-1
+!        READ PRMTOP FILE AND READ ATOMIC MASSES
+!        OPEN PRMTOP FILE
+         allocate(atmass(natom))
+         open(unit=101,file='top',iostat=ierr)
          if (ierr /= 0) then
             write(*,'(A,A)') 'ERROR OPENING INPUT FILE ',datafile
             STOP
          end if
 
-         write(fmt,'("(",I6,"D24.15)")') nsteps-1
+         call nxtsec_reset()
+         fmtin = '(5E16.8)'
+         type = 'MASS'
+         call nxtsec(101, 6, 0, fmtin, type, fmt, err)
+       
+         read(101, fmt) (atmass(i), i = 1, natom)
+         close(unit=101)
+         atmass=sqrt(atmass)
+
+
+         err = nf90_close( ncid )
+         write(*,*) err
 !        FOURIER TRANSFORM OF THE AUTOCORRELATION FUNCTION OF EACH COORDINATE
 !        IN TURN...
-         cumul=0d0
 
          specframes=nframes/2+1
          specdim=specframes/2+1
-         allocate( tdspec(specdim,nframes/2+1) )
+         allocate( tdspec(specdim,nframes/2+1), cumul(specdim,nframes/2+1)  )
+         allocate( veltraj_window(specframes))
+         cumul=0d0
          tdspec=0d0
 
-         do time0=1,nframes/2-2
+         if (NC_error( nf90_open( datafile, NF90_NOWRITE, ncid ))) stop
          do iatm=1,natom
          do xyz=1,3
-            start=(/ time0, xyz, natom /)
-            count=(/ time0+specframes, xyz, natom /)
-            write(*,*) 'ANALYZING ATOM No ', iatm
+            write(*,*) ' xyz ',xyz,' iatm ', iatm
+            start=(/ xyz, natom, 1 /)
+            count=(/ 1, 1, nframes /)
             ! Get velocities
-            if (velocityVID.ne.-1) then
-              velocities_found=.true.
-              if (NC_error(nf90_get_var(ncid, velocityVID, Veltraj(1:nframes), &
+            if (NC_error(nf90_get_var(ncid, velocityVID, veltraj(1:nframes), &
                            start = start, count = count),&
-                           "read_nc_restart(): Getting velocities")) stop
-            endif
+                           "pump_probe(): Getting velocities")) stop
 
-!           @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-!           DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
-!           @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-!           CREATES FAKE DATA COMPOSED OF A SUM OF THREE SINE FUNCTIONS.
-            !
-            ! PI = 3.14159d0
-            ! nu1= 0.5d0
-            ! nu2= 1.0d0
-            ! nu3= 2.22d0
-            !
-            ! do k=0,nsteps-1
-            !    tt= real(k,8) * dt
-            !    CALL RANDOM_NUMBER(noise)
-            !    vel(k) = sin( 2d0 * PI * nu1 * tt ) + &
-            !    &        sin( 2d0 * PI * nu2 * tt ) + &
-            !    &        sin( 2d0 * PI * nu3 * tt ) !+ 10d0 * noise
-            !    write(89,*) vel(k)
-            ! end do
-            !
-!           @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-!           DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
-!           @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+            veltraj=atmass(iatm)*veltraj
 
-            if (iatm==1 .AND. xyz==1) then
-               call dfftw_plan_dft_r2c_1d(plan,nsteps,veltraj,out,"FFTW_ESTIMATE")
-            endif
-            call dfftw_execute_dft_r2c(plan, veltraj, out)
-            out = conjg(out)*out
-            write(100,fmt) REAL(out)
-            cumul = cumul + REAL(out)
+            do time0=1,nframes/2-2
+               veltraj_window=veltraj(time0:time0+specframes)
+               if (iatm==1 .AND. xyz==1) then
+                  call dfftw_plan_dft_r2c_1d(plan,specframes,veltraj_window,out,"FFTW_ESTIMATE")
+               endif
+               call dfftw_execute_dft_r2c(plan, veltraj_window, out)
+               out = conjg(out)*out
+               cumul(:,time0) = REAL(out)
+            end do
+            err = nf90_close( ncid )
          end do
-         end do
-         tdspec(:,time0) = cumul
+         tdspec = tdspec + cumul
          end do
 
+         write(fmt,'("(",I6,"D24.15)")') specframes
+         write(*,*) fmt
 !        Writing sum spectra to disk.
          open(unit=1000,file='sum_spectra.dat',iostat=ierr)
          if (ierr /= 0) then
             write(*,'(A,A)') 'ERROR OPENING INPUT FILE ',datafile
             STOP
          end if
-         write(1000,fmt) cumul
+         do time0=1,nframes/2-2
+            write(1000,fmt) tdspec(:,time0)
+         end do
          close(unit=1000,iostat=ierr)
 
 !        Destroying fftw plan

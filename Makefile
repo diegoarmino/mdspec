@@ -6,7 +6,7 @@ SRCDIR=$(BASEDIR)
 
 FC=gfortran
 FFLAGS= -O3 -ipo -xHost -FR
-FFLAGS= -cpp -DBINTRAJ -O3 -mtune=native 
+FFLAGS= -cpp -DBINTRAJ -O3 -mtune=native -fno-backtrace
 INC= -I$(HOME)/progs/fftw/include -L$(HOME)/progs/fftw/lib -lfftw3
 INC += -I$(AMBERHOME)/include -L$(AMBERHOME)/lib -lnetcdf -lnetcdff
 FLIBS= 
@@ -15,8 +15,14 @@ FLIBS=
 
 all: clean mdspec
 
-mdspec: mdspecNetcdf_mod.o pump_probe_mod.o linearSpectroscopy_mod.o mdspec_main.o
+mdspec: nextprmtop_section_mod.o mdspecNetcdf_mod.o pump_probe_mod.o linearSpectroscopy_mod.o mdspec_main.o
 	$(FC) $(FFLAGS) -o $@ $^ $(FLIBS) $(INC)
+
+#----------------------------------------------------------------------------------------
+# NEXTPRMTOP SECTION MODULE
+#----------------------------------------------------------------------------------------
+nextprmtop_section_mod.o: nextprmtop_section_mod.F90
+	$(FC) $(FFLAGS) $(INC) -c $^ $(FLIBS)
 
 #----------------------------------------------------------------------------------------
 # NETCDF MODULE
@@ -27,7 +33,7 @@ mdspecNetcdf_mod.o: mdspecNetcdf_mod.F90
 #----------------------------------------------------------------------------------------
 # PUMP-PROBE MODULE
 #----------------------------------------------------------------------------------------
-pump_probe_mod.o: mdspecNetcdf_mod.o pump_probe_mod.F90 
+pump_probe_mod.o: nextprmtop_section_mod.o mdspecNetcdf_mod.o pump_probe_mod.F90 
 	$(FC) $(FFLAGS) $(INC) -c $^ $(FLIBS) 
 
 #----------------------------------------------------------------------------------------
