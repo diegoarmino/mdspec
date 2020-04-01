@@ -16,7 +16,8 @@ call getdims(infile,nsteps,spatial,natoms)
 specframes=int(nsteps/2)
 specdim=int(specframes/2+1)
 
-allocate( tdspec((NSTEPS/2+1)/2+1,NSTEPS/2), atmass(natoms) )
+!allocate( tdspec((NSTEPS/2+1)/2+1,NSTEPS/2), atmass(natoms) )
+allocate( tdspec(5000,5000), atmass(natoms) )
 
 call get_at_mass_prmtop(natoms,topfile,atmass)
 
@@ -130,7 +131,8 @@ DOUBLE PRECISION :: coordinate,dt
 DOUBLE PRECISION, DIMENSION(NSTEPS) :: coordinate_evol
 DOUBLE PRECISION, DIMENSION(NSTEPS/2) :: veltraj_window
 COMPLEX*16      , DIMENSION((NSTEPS/2+1)/2+1) :: out
-DOUBLE PRECISION, DIMENSION((NSTEPS/2+1)/2+1,NSTEPS/2),intent(out) :: tdspec
+!DOUBLE PRECISION, DIMENSION((NSTEPS/2+1)/2+1,NSTEPS/2),intent(out) :: tdspec
+DOUBLE PRECISION, DIMENSION(5000,5000),intent(out) :: tdspec
 
 INTEGER(KIND=4) :: ncid, xtype, ndims, varid
 CHARACTER(LEN=50) :: xname, vname
@@ -152,11 +154,11 @@ do i = 1,natoms !natoms
       point = (/ j, i, 1 /)
       endp = (/ 1,1,nsteps-1 /)
       CALL check(nf90_get_var(ncid,4,coordinate_evol,start = point,count = endp))
-      do time0=1,specframes-1
+      do time0=1,5000
          veltraj_window=coordinate_evol(time0:time0+nsteps/2-1)
          call dfftw_execute_dft_r2c(plan, veltraj_window, out)
          out = conjg(out)*out
-         tdspec(:,time0) = tdspec(:,time0) + REAL(out) ! DEBUG
+         tdspec(:,time0) = tdspec(:,time0) + REAL(out(1:5000)) ! DEBUG
       end do
   end do
 end do
@@ -191,7 +193,7 @@ if (ierr /= 0) then
    write(*,'(A,A)') 'ERROR OPENING INPUT FILE sum_spectra.dat'
    STOP
 end if
-do time0=1,specframes-1
+do time0=1,5000
    write(1000,fmt) tdspec(:,time0)
 end do
 close(unit=1000,iostat=ierr)
