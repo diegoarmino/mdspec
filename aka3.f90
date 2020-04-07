@@ -10,18 +10,19 @@ integer                :: specdim
 INTEGER*8              :: plan
 
 call get_command_argument(1,eqmd_file)
-call get_command_argument(1,neq1_file)
-call get_command_argument(1,neq2_file)
-call get_command_argument(2,topfile)
+call get_command_argument(2,neq1_file)
+call get_command_argument(3,neq2_file)
+call get_command_argument(4,topfile)
 
 !GET NETCDF INFORMATION
 call getdims(eqmd_file,nsteps,spatial,natoms)
 dt=1.0d-15
-specframes=int(nsteps/2)
+!specframes=int(nsteps/2)
+specframes=int(40000)
 specdim=int(specframes/2+1)
 
 !allocate( tdspec((NSTEPS/2+1)/2+1,NSTEPS/2), atmass(natoms) )
-allocate( tdspec(5000,5000), atmass(natoms) )
+allocate( tdspec(5000,10000), atmass(natoms) )
 
 !GET ATOMIC MASSES FROM PRMTOP FILE AND SQRT THEM.
 call get_at_mass_prmtop(natoms,topfile,atmass)
@@ -49,11 +50,17 @@ INTEGER(KIND=4) :: ncid
 CHARACTER(LEN=50), INTENT(IN) :: infile
 CHARACTER(LEN=50) :: xname, yname, zname
 
+write(*,*) 'inside getdims. Attempting to open file ', infile
 CALL check(nf90_open(infile, nf90_nowrite, ncid))
+write(*,*) 'opened file ', infile, ncid
 CALL check(nf90_inquire_dimension(ncid,1,xname,nsteps))
+write(*,*) 'inquired nsteps ', xname, nsteps
 CALL check(nf90_inquire_dimension(ncid,2,yname,spatial))
+write(*,*) 'inquired spatial ', yname, spatial
 CALL check(nf90_inquire_dimension(ncid,3,zname,natoms))
+write(*,*) 'inquired natoms ', zname, natoms
 CALL check(nf90_close(ncid))
+write(*,*) 'closed file ', ncid
 END SUBROUTINE getdims
 
 
@@ -99,14 +106,17 @@ INTEGER*8,         INTENT(OUT) :: plan
 
 INTEGER,          DIMENSION(3)                 :: point,endp
 DOUBLE PRECISION, DIMENSION(NSTEPS)            :: coordinate_evol
-DOUBLE PRECISION, DIMENSION(NSTEPS/2)          :: veltraj_window
-COMPLEX*16      , DIMENSION((NSTEPS/2+1)/2+1)  :: out
+!DOUBLE PRECISION, DIMENSION(NSTEPS/2)          :: veltraj_window
+DOUBLE PRECISION, DIMENSION(40000)          :: veltraj_window
+!COMPLEX*16      , DIMENSION((NSTEPS/2+1)/2+1)  :: out
+COMPLEX*16      , DIMENSION(40000/2+1)  :: out
 
 INTEGER :: ncid,i,j,k,time0,specdim,specframes
 
 write(*,*) 'MAKING FFTW PLAN...'
 
-specframes=int(nsteps/2)
+!specframes=int(nsteps/2)
+specframes=int(40000)
 specdim=int(specframes/2+1)
 
 ! READ FIRST LINE OF DATASET AS A REPRESENTATIVE.
@@ -116,7 +126,8 @@ point = (/ 1, 1, 1 /)
 endp = (/ 1,1,nsteps-1 /)
 CALL check(nf90_get_var(ncid,4,coordinate_evol,start = point, count = endp))
 CALL check(nf90_close(ncid))
-veltraj_window=coordinate_evol(1:int(nsteps/2))
+!veltraj_window=coordinate_evol(1:int(nsteps/2))
+veltraj_window=coordinate_evol(1:40000)
 
 ! MEASURE THE BEST PLAN FOR FOURIER TRANSFORM. THIS IS MORE TIME-CONSUMING
 ! THAN THE ESTIMATE OPTION, BUT GIVEN THE AMOUNT OF CALLS TO FFTW IT IS 
@@ -139,10 +150,12 @@ INTEGER*8,         INTENT(IN) :: plan
 DOUBLE PRECISION,  INTENT(IN) :: atmass(natoms)
 DOUBLE PRECISION :: coordinate,dt
 DOUBLE PRECISION, DIMENSION(NSTEPS) :: eqmd_traj,neq1_traj,neq2_traj
-DOUBLE PRECISION, DIMENSION(NSTEPS/2) :: veltraj_window
-COMPLEX*16      , DIMENSION((NSTEPS/2+1)/2+1) :: out
+!DOUBLE PRECISION, DIMENSION(NSTEPS/2) :: veltraj_window
+DOUBLE PRECISION, DIMENSION(40000) :: veltraj_window
+!COMPLEX*16      , DIMENSION((NSTEPS/2+1)/2+1) :: out
+COMPLEX*16      , DIMENSION(40000/2+1) :: out
 !DOUBLE PRECISION, DIMENSION((NSTEPS/2+1)/2+1,NSTEPS/2),intent(out) :: tdspec
-DOUBLE PRECISION, DIMENSION(5000,5000),intent(out) :: tdspec
+DOUBLE PRECISION, DIMENSION(5000,10000),intent(out) :: tdspec
 
 INTEGER(KIND=4) :: ncid1, ncid2, ncid3, xtype, ndims, varid
 CHARACTER(LEN=50) :: xname, vname
@@ -150,7 +163,8 @@ CHARACTER(LEN=20) :: fmt
 integer, dimension(3) :: point,endp
 integer :: i,j,k,time0,ierr,specdim,specframes
 
-specframes=int(nsteps/2)
+!specframes=int(nsteps/2)
+specframes=40000
 specdim=int(specframes/2+1)
 
 CALL check(nf90_open(eqmd_file, nf90_nowrite, ncid1))
@@ -170,18 +184,21 @@ do i = 1,natoms !natoms
       CALL check(nf90_get_var(ncid1,4,eqmd_traj,start = point,count = endp))
       CALL check(nf90_get_var(ncid2,4,neq1_traj,start = point,count = endp))
       CALL check(nf90_get_var(ncid3,4,neq2_traj,start = point,count = endp))
-      do time0=1,5000
-         veltraj_window=eqmd_traj(time0:time0+nsteps/2-1)
+      eqmd_traj=eqmd_traj*atmass(i)
+      neq1_traj=neq1_traj*atmass(i)
+      neq2_traj=neq2_traj*atmass(i)
+      do time0=1,10000
+         veltraj_window=eqmd_traj(time0:time0+40000-1)
          call dfftw_execute_dft_r2c(plan, veltraj_window, out)
          out = conjg(out)*out
          tdspec(:,time0) = tdspec(:,time0) -       REAL(out(1:5000)) ! DEBUG
 
-         veltraj_window=neq1_traj(time0:time0+nsteps/2-1)
+         veltraj_window=neq1_traj(time0:time0+40000-1)
          call dfftw_execute_dft_r2c(plan, veltraj_window, out)
          out = conjg(out)*out
          tdspec(:,time0) = tdspec(:,time0) + 0.5d0*REAL(out(1:5000)) ! DEBUG
 
-         veltraj_window=neq2_traj(time0:time0+nsteps/2-1)
+         veltraj_window=neq2_traj(time0:time0+40000-1)
          call dfftw_execute_dft_r2c(plan, veltraj_window, out)
          out = conjg(out)*out
          tdspec(:,time0) = tdspec(:,time0) + 0.5d0*REAL(out(1:5000)) ! DEBUG
@@ -240,6 +257,9 @@ do i = 1,natoms !natoms
       CALL check(nf90_get_var(ncid1,4,eqmd_traj,start = point,count = endp))
       CALL check(nf90_get_var(ncid2,4,neq1_traj,start = point,count = endp))
       CALL check(nf90_get_var(ncid3,4,neq2_traj,start = point,count = endp))
+      eqmd_traj=eqmd_traj*atmass(i)
+      neq1_traj=neq1_traj*atmass(i)
+      neq2_traj=neq2_traj*atmass(i)
       eqmd_ke = eqmd_ke + 0.5d0 * eqmd_traj * eqmd_traj
       neq1_ke = neq1_ke + 0.5d0 * neq1_traj * neq1_traj
       neq2_ke = neq2_ke + 0.5d0 * neq2_traj * neq2_traj
@@ -298,7 +318,8 @@ integer                                    :: specframes
 integer                                    :: specdim
 integer                                    :: i,time0
 
-specframes=int(nsteps/2)
+!specframes=int(nsteps/2)
+specframes=int(40000)
 specdim=int(specframes/2+1)
 
 write(fmt,'("(",I6,"D24.15)")') nsteps/2+1
@@ -309,7 +330,7 @@ if (ierr /= 0) then
    write(*,'(A,A)') 'ERROR OPENING INPUT FILE sum_spectra.dat'
    STOP
 end if
-do time0=1,5000
+do time0=1,10000
    write(1000,fmt) tdspec(:,time0)
 end do
 close(unit=1000,iostat=ierr)
@@ -327,7 +348,7 @@ sample_rate=sample_rate/1d12 ! dt in ps, freq in THz
 nu_increment = sample_rate/dble(specframes)
 
 nu = 0d0
-do i = 1,specdim
+do i = 1,10000
    write(1,'(D17.8)') nu
    nu = nu + nu_increment
 end do

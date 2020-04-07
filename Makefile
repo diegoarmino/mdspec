@@ -8,8 +8,7 @@ FC=gfortran
 FFLAGS= -O3 -ipo -xHost -FR
 FFLAGS= -cpp -DBINTRAJ -O3 -mtune=native -fno-backtrace
 INC= -I$(HOME)/progs/fftw/include -L$(HOME)/progs/fftw/lib -lfftw3
-INCNC= `nf-config --fflags --flibs --has-nc4`
-INCNC= `nf-config --fflags --flibs`
+INCNC= `/usr/bin/nf-config --fflags --flibs`
 ## INC += -I$(AMBERHOME)/include -L$(AMBERHOME)/lib -lnetcdf -lnetcdff
 FLIBS= 
 ##gfortran   -DBINTRAJ -DEMIL -DPUBFFT -DGNU_HACKS -O3 -mtune=native   -I/home/diegoa/progs/amber18/include -c AmberNetcdf.F90
@@ -30,13 +29,13 @@ nextprmtop_section_mod.o: nextprmtop_section_mod.F90
 # NETCDF MODULE
 #----------------------------------------------------------------------------------------
 mdspecNetcdf_mod.o: mdspecNetcdf_mod.F90
-	$(FC) $(FFLAGS) $(INC) -c $^ $(FLIBS) `nf-config --fflags --flibs`
+	$(FC) $(FFLAGS) $(INC) -c $^ $(FLIBS) $(INCNC)
 
 #----------------------------------------------------------------------------------------
 # PUMP-PROBE MODULE
 #----------------------------------------------------------------------------------------
 pump_probe_mod.o: nextprmtop_section_mod.o mdspecNetcdf_mod.o pump_probe_mod.F90 
-	$(FC) $(FFLAGS) $(INC) -c $^ $(FLIBS) `nf-config --fflags --flibs`
+	$(FC) $(FFLAGS) $(INC) -c $^ $(FLIBS) $(INCNC)
 
 
 #----------------------------------------------------------------------------------------
@@ -50,7 +49,7 @@ linearSpectroscopy_mod.o: linearSpectroscopy_mod.F90
 #----------------------------------------------------------------------------------------
 
 mdspec_main.o: pump_probe_mod.o linearSpectroscopy_mod.o mdspec_main.F90
-	$(FC) $(FFLAGS) $(INC) -c mdspec_main.F90 $(FLIBS) -o mdspec_main.o `nf-config --fflags --flibs`
+	$(FC) $(FFLAGS) $(INC) -c mdspec_main.F90 $(FLIBS) -o mdspec_main.o $(INCNC)
 
 
 #----------------------------------------------------------------------------------------
