@@ -176,6 +176,11 @@ eqmd_traj=0d0
 neq1_traj=0d0
 neq2_traj=0d0
 
+! DEBUG
+write(fmt,'("(",I6,"D24.15)")') nsteps/2+1
+write(*,*) fmt
+! DEBUG
+
 do i = 1,natoms !natoms
   write(*,*) 'STARTING ATOM ',i,' OUT OF ',natoms
   do j = 1,3 !3
@@ -187,21 +192,25 @@ do i = 1,natoms !natoms
       eqmd_traj=eqmd_traj*atmass(i)
       neq1_traj=neq1_traj*atmass(i)
       neq2_traj=neq2_traj*atmass(i)
-      do time0=1,10000
+      !do time0=1,10000
+      do time0=1,10000,250 !DEBUG
          veltraj_window=eqmd_traj(time0:time0+40000-1)
          call dfftw_execute_dft_r2c(plan, veltraj_window, out)
          out = conjg(out)*out
-         tdspec(:,time0) = tdspec(:,time0) -       REAL(out(1:5000)) ! DEBUG
+         tdspec(:,time0) = tdspec(:,time0) -       REAL(out(1:5000)) 
+         write(123,fmt) REAL(out(1:5000))
 
          veltraj_window=neq1_traj(time0:time0+40000-1)
          call dfftw_execute_dft_r2c(plan, veltraj_window, out)
          out = conjg(out)*out
-         tdspec(:,time0) = tdspec(:,time0) + 0.5d0*REAL(out(1:5000)) ! DEBUG
+         tdspec(:,time0) = tdspec(:,time0) + 0.5d0*REAL(out(1:5000)) 
+         write(124,fmt) REAL(out(1:5000))
 
          veltraj_window=neq2_traj(time0:time0+40000-1)
          call dfftw_execute_dft_r2c(plan, veltraj_window, out)
          out = conjg(out)*out
-         tdspec(:,time0) = tdspec(:,time0) + 0.5d0*REAL(out(1:5000)) ! DEBUG
+         tdspec(:,time0) = tdspec(:,time0) + 0.5d0*REAL(out(1:5000)) 
+         write(125,fmt) REAL(out(1:5000))
       end do
   end do
 end do
@@ -330,7 +339,8 @@ if (ierr /= 0) then
    write(*,'(A,A)') 'ERROR OPENING INPUT FILE sum_spectra.dat'
    STOP
 end if
-do time0=1,10000
+!do time0=1,10000
+do time0=1,10000,250 !DEBUG
    write(1000,fmt) tdspec(:,time0)
 end do
 close(unit=1000,iostat=ierr)
@@ -348,7 +358,7 @@ sample_rate=sample_rate/1d12 ! dt in ps, freq in THz
 nu_increment = sample_rate/dble(specframes)
 
 nu = 0d0
-do i = 1,10000
+do i = 1,5000
    write(1,'(D17.8)') nu
    nu = nu + nu_increment
 end do
